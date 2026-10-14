@@ -69,7 +69,9 @@ def _sync_creator_account_from_pc_cookie(
     try:
         creator_result = creator_adapter.exchange_from_user_cookies(trans_cookies(cookie_string))
         creator_cookies_text = json.dumps(creator_result["cookies"], ensure_ascii=False, separators=(",", ":"))
-        creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
+        creator_user_info = creator_result.get("user_info")
+        if creator_user_info is None:
+            creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
         upsert_platform_account_from_login(
             db=db,
             user_id=user_id,

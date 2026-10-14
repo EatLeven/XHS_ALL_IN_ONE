@@ -1,5 +1,6 @@
 import { Alert, Button, Checkbox, Form, Input, Space, Typography } from "antd";
 import { MessageOutlined, CheckCircleOutlined } from "@ant-design/icons";
+import axios from "axios";
 import { useEffect, useState } from "react";
 
 import { confirmXhsPhoneLogin, sendXhsPhoneCode } from "../../lib/api";
@@ -13,6 +14,16 @@ type PhoneLoginPanelProps = {
 };
 
 const PHONE_CODE_COOLDOWN_SECONDS = 120;
+
+function sendCodeErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === "string" && detail) {
+      return detail;
+    }
+  }
+  return "验证码发送失败。";
+}
 
 export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelProps) {
   const [phone, setPhone] = useState("");
@@ -58,8 +69,8 @@ export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelPro
       setSessionId(result.session_id);
       setStatusText("验证码已发送，请查看手机短信");
       setCooldownSeconds(PHONE_CODE_COOLDOWN_SECONDS);
-    } catch {
-      setError("验证码发送失败。");
+    } catch (caught) {
+      setError(sendCodeErrorMessage(caught));
     } finally {
       setIsSending(false);
     }

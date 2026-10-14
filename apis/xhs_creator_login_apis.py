@@ -31,13 +31,13 @@ from xhs_utils.xhs_creator.state import (
 )
 
 
-CREATOR_WEB_BUILD = '1.18.0'
+CREATOR_WEB_BUILD = '1.26.0'
 CREATOR_WEBPROFILE_SDK = '4.3.6'
 CREATOR_LOGIN_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9'
 CREATOR_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
-    'Chrome/150.0.0.0 Safari/537.36'
+    'Chrome/152.0.0.0 Safari/537.36'
 )
 _GETDSS_RE = re.compile(r"function\s+getdss\s*\(\s*\)\s*\{\s*return\s+'(\d+)'")
 _SECURITY_COOKIE_LENGTHS = {
@@ -83,19 +83,19 @@ QR_STATUS_MESSAGES = {
 # 概率闸门（2026-07-25 实证）：被标记的会话重发全部 406，通过的会话持续稳定；
 # 同请求重发无效，必须整包重建匿名设备会话。通过率随时间波动（实测 ~0%-50%），
 # 16 次尝试在中等通过率（≥0.2）下累计成功率 >97%。
-LOGIN_SESSION_MAX_ATTEMPTS = 16
+LOGIN_SESSION_MAX_ATTEMPTS = 1
 
 
 class XHSCreatorLoginApi:
     """Browser-independent domestic Creator QR/SMS login client.
 
     The initialization order follows the Creator 4.3.6 browser
-    (CDP capture + mns pack decode, build 1.19.3, 2026-07-25):
+    (CDP capture + mns pack decode, build 1.26.0, 2026-09-06):
 
     1. anonymous Cookie/device state;
     2. fetch the honeypot and DS program (DS request is MNS0201/nop);
-    3. install the DS program immediately, then run zones, the automatic
-       CAS probe, redcaptcha and sbtsource — all MNS0101/a1 login_early
+    3. install the DS program immediately, then run redcaptcha, sbtsource,
+       zones and the automatic CAS probe — all MNS0101/a1 login_early
        (406s there are per-request probabilistic and retried in-session);
     4. finish seccallback/webprofile as MNS0101/a1
        (login_callback/login_ready);
@@ -199,25 +199,6 @@ class XHSCreatorLoginApi:
         b1_value: str | None = None,
         dsl_pair_value: str | None = None,
     ) -> tuple[dict, dict, str]:
-        # 独立调用（未经登录引导、直接用 Cookie 新建实例）时保证 DS 程序在位：
-        # 0101 + 非 nop 的签名需要服务端 DS 程序的 _dsf；get_ds_bundle 有缓存，
-        # 重复调用零成本。
-        resolved, material = self.profile.resolve_mns_material(
-            tier=tier,
-            mns_profile=mns_profile,
-        )
-        if (
-            resolved == '0101'
-            and material.device_tag != 'nop'
-            and not self.profile.ds_program
-        ):
-            from xhs_utils.xhs_creator.dsl import get_ds_bundle
-
-            dsl, program = get_ds_bundle(
-                proxies=self.proxies,
-                http_client=self.http,
-            )
-            self.profile.activate_security(dsl, ds_program=program)
         headers, cookies, body = generate_profile_request_params(
             self.profile,
             api,
@@ -255,23 +236,14 @@ class XHSCreatorLoginApi:
         request_body=None,
         response=None,
     ) -> None:
-        """诊断用：设置环境变量 XHS_CREATOR_DEBUG=1 时打印请求/响应实况。
-
-        默认关闭，不影响正常流程。用于抓取失败的 CAS 请求（Cookie 头、签名头、
-        服务端返回码与原始 body），以便逐字节对比浏览器抓包。
-        """
+        """Record only request shape and HTTP status for Creator diagnostics."""
         if not os.environ.get('XHS_CREATOR_DEBUG'):
             return
         lines = [f'==== DEBUG {label} ====']
         if request_headers is not None:
-            for key in (
-                'x-ratelimit-meta', 'x-t', 'x-s', 'x-s-common',
-                'origin', 'referer', 'cookie',
-            ):
-                if key in request_headers:
-                    lines.append(f'  req {key}: {request_headers[key]}')
+            lines.append(f'  req header names: {sorted(request_headers)}')
         if request_body is not None:
-            lines.append(f'  req body: {request_body}')
+            lines.append('  req body: present')
         if response is not None:
             lines.append(f'  status: {response.status_code}')
             try:
@@ -280,8 +252,6 @@ class XHSCreatorLoginApi:
                 resp_cookies = {}
             if resp_cookies:
                 lines.append(f'  set-cookie keys: {list(resp_cookies)}')
-            text = getattr(response, 'text', '') or ''
-            lines.append(f'  resp body: {text[:800]}')
         logger.debug('\n'.join(lines))
 
     @staticmethod
@@ -341,6 +311,62 @@ class XHSCreatorLoginApi:
             self._complete_security()
         return self.profile.cookie_map
 
+    def bootstrap_publish_navigation(self, *, path: str = '/publish/publish?source=official'):
+        """Load the authenticated Creator publish document once.
+
+        A PC QR/SMS session carries the shared ``web_session``/``id_token``
+        values, but Creator's publish document exchanges those values for a
+        second set of HttpOnly cookies (``customer-sso-sid``,
+        ``access-token-creator.xiaohongshu.com``, ``galaxy_creator_session_id``
+        and related fields).  Browsers receive them during the cross-site
+        navigation before the first Creator XHR; a pure API bridge must do the
+        same request explicitly or the later permit endpoint is rejected with
+        HTTP 406.
+
+        The response body is intentionally ignored.  Only response cookies
+        and host-scoped edge cookies are merged into the login profile.
+        """
+        navigation_headers = build_creator_navigation_headers({
+            'upgrade-insecure-requests': '1',
+            'user-agent': CREATOR_USER_AGENT,
+            'sec-ch-ua': CREATOR_SEC_CH_UA,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'accept': (
+                'text/html,application/xhtml+xml,application/xml;q=0.9,'
+                'image/avif,image/webp,image/apng,*/*;q=0.8,'
+                'application/signed-exchange;v=b3;q=0.7'
+            ),
+            'accept-language': CREATOR_LOGIN_ACCEPT_LANGUAGE,
+            'priority': 'u=0, i',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-site',
+            'sec-fetch-user': '?1',
+        }, self._cookies_for_url(self.creator_url, self.profile.cookie_map))
+        before_keys = set(self.profile.cookie_map)
+        response = self.http.get(
+            self.creator_url + str(path),
+            headers=navigation_headers,
+            proxies=self.proxies,
+            allow_redirects=True,
+            timeout=REQUEST_TIMEOUT,
+        )
+        self._merge_response_cookies(response)
+        if os.environ.get('XHS_CREATOR_DEBUG'):
+            after_keys = set(self.profile.cookie_map)
+            logger.debug(
+                'Creator publish navigation: http={} cookie_keys={} new_keys={}',
+                getattr(response, 'status_code', None),
+                sorted(after_keys),
+                sorted(after_keys - before_keys),
+            )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f'Creator publish navigation failed (HTTP {response.status_code})'
+            )
+        return self.profile.cookie_map
+
     def _fetch_honeypot(self) -> None:
         """Request the launcher's unsigned, best-effort honeypot program.
 
@@ -374,14 +400,25 @@ class XHSCreatorLoginApi:
         self._merge_response_cookies(response)
 
     def _bootstrap_security(self) -> None:
-        """Start the browser's MNS0201/nop bootstrap and retain the DS program."""
+        """Start the browser's MNS0201/nop bootstrap.
+
+        Chrome 152 keeps the first security batch on ``mns0201/nop``.  The
+        batch is deliberately split across :meth:`_finish_security_bootstrap`
+        so the request order remains redcaptcha -> scripting -> sbtsource;
+        only after that batch does the page switch to ``mns0101/a1``.
+        """
         if self._security_started:
             return
 
         self._fetch_honeypot()
 
-        # The DS request is the only signed MNS0201/nop request in the fresh
-        # page11 capture. Its X-S-Common precedes both b1 and DSL readiness.
+        self._security_started = True
+
+    def _bootstrap_dsl_program(self) -> None:
+        """Fetch the server DS program while still on the 0201/nop tier."""
+        if self._pending_dsl and self._pending_ds_program:
+            return
+
         ds_body = {
             'callFrom': 'creator-platform',
             'callback': '',
@@ -391,8 +428,11 @@ class XHSCreatorLoginApi:
         headers, cookies, body = self._signed(
             '/api/sec/v1/scripting', ds_body, 'POST',
             tier='0201',
-            b1_value='',
-            dsl_pair_value='null;undefined',
+            mns_profile=None,
+            b1_profile='login',
+            dsl_pair_value=(
+                f'{self.profile.session.loadts};undefined'
+            ),
         )
         headers['content-type'] = 'application/json'
         headers = build_creator_login_headers(
@@ -430,15 +470,21 @@ class XHSCreatorLoginApi:
                 ds_code = fallback_program
         self._pending_dsl = dsl
         self._pending_ds_program = ds_code
-        # 浏览器原生时序：DS 响应到达即安装，zones/tgt/redcaptcha/sbtsource
-        # 用 0101/a1。但 2026-07-25 实测：脚本客户端 tgt@0101 通过率仅 ~20%
-        # （概率闸门针对 0101 档），tgt@0201 稳定 100%——这四条刻意走
-        # 0201/nop 冷路径保可靠性，DS 推迟到 seccallback 前安装。
-        self._security_started = True
 
     def _activate_security(self) -> None:
         """在进入 mns0101/a1 阶段前安装服务端 DS 程序（对齐浏览器时序）。"""
-        if self.profile.session.security_ready:
+        # A PC -> Creator bridge can start with shared ``gid``/``websectiga``
+        # cookies.  ``CreatorDeviceProfile.update_cookies`` quite correctly
+        # marks that session as authenticated, but those cookies do not mean
+        # that Creator's own server-issued DS program has been installed.
+        # Only skip activation when both the ready flag and the actual DS
+        # material are present; otherwise the first 0101 request would omit
+        # ``dsProgram`` and fail the exact ``_dsf`` signer gate.
+        if (
+            self.profile.session.security_ready
+            and self.profile.dsl
+            and self.profile.ds_program
+        ):
             return
         if not self._pending_dsl or not self._pending_ds_program:
             dsl, program = get_ds_bundle(
@@ -453,23 +499,26 @@ class XHSCreatorLoginApi:
             timestamp_ms=int(time.time() * 1000),
         )
 
-    def _finish_security_bootstrap(self) -> None:
-        """Run redcaptcha/sbtsource on the browser-native mns0101/a1 login_early tier."""
+    def _finish_security_bootstrap(self, *, activate: bool = True) -> None:
+        """Run the browser's 0201 security batch, then install DS material."""
         if self._security_bootstrapped:
             return
         if not self._security_started:
             self._bootstrap_security()
 
-        # 浏览器原生是 0101/a1，但脚本客户端实测 0101 档通过率 ~20%、
-        # 0201/nop 冷路径 ~100%（2026-07-25 五连发对照），刻意走 0201。
-        # Redcaptcha carries trace headers but no empty authorization header.
+        # On Chrome 152 redcaptcha is the first signed request and still uses
+        # mns0201/nop.  Its X-S-Common already contains the generated page b1;
+        # only the DSL half is unavailable at this point.
         headers, cookies, body = self._signed(
             '/api/redcaptcha/v2/getconfig', {}, 'POST',
             include_trace_headers=True,
             include_authorization=False,
             tier='0201',
-            b1_value='',
-            dsl_pair_value='null;undefined',
+            mns_profile=None,
+            b1_profile='login',
+            dsl_pair_value=(
+                f'{self.profile.session.loadts};undefined'
+            ),
         )
         headers = build_creator_login_headers(
             headers,
@@ -488,12 +537,20 @@ class XHSCreatorLoginApi:
         )
         self._merge_response_cookies(response)
 
+        # The DS program is fetched after redcaptcha.  The response is kept
+        # locally and is not evaluated in the browser; _dsf is run by the
+        # restricted Node signer for the first 0101 request.
+        self._bootstrap_dsl_program()
+
         sbt_body = {'callFrom': 'creator-platform', 'appId': 'ugc'}
         headers, cookies, body = self._signed(
             '/api/sec/v1/sbtsource', sbt_body, 'POST',
             tier='0201',
-            b1_value='',
-            dsl_pair_value='null;undefined',
+            mns_profile=None,
+            b1_profile='login',
+            dsl_pair_value=(
+                f'{self.profile.session.loadts};undefined'
+            ),
         )
         headers = build_creator_login_headers(
             headers,
@@ -512,6 +569,11 @@ class XHSCreatorLoginApi:
         )
         self._merge_response_cookies(sbt_response)
         self._security_bootstrapped = True
+        # A logged-in publish navigation emits one final user/info request on
+        # 0201/nop before switching to 0101/a1.  QR/phone flows have no such
+        # shared-session request and can activate immediately.
+        if activate:
+            self._activate_security()
 
     def _complete_security(self) -> None:
         """Run the DS-ready seccallback and webprofile phase once."""
@@ -521,9 +583,8 @@ class XHSCreatorLoginApi:
             self._bootstrap_security()
         if not self._security_bootstrapped:
             self._finish_security_bootstrap()
-        # sbtsource 之后安装 DS 程序（浏览器原生是 DS 响应后立即安装；此处为
-        # 端到端已验证的冷路径时序），随后 seccallback/webprofile 切到
-        # mns0101/a1（login_callback/login_ready）。
+        # DS 已在 bootstrap 响应后安装；seccallback/webprofile 分别使用
+        # login_callback 与 login_ready 的 0101/a1 档位。
         self._activate_security()
         if not self.profile.session.security_ready:
             raise RuntimeError('Creator DS program was not activated after bootstrap')
@@ -557,7 +618,7 @@ class XHSCreatorLoginApi:
             'POST',
             tier='0101',
             mns_profile='login_callback',
-            b1_value='',
+            b1_profile='login',
         )
         headers['content-type'] = 'application/json'
         headers = build_creator_login_headers(
@@ -606,6 +667,13 @@ class XHSCreatorLoginApi:
         return websectiga
 
     def _fetch_gid(self) -> Optional[str]:
+        # A same-site navigation from the already logged-in PC page carries a
+        # valid shared gid.  Chrome skips the webprofile POST in that case;
+        # preserve that behavior instead of issuing a redundant profile
+        # report from the Creator bridge.
+        existing = str(self.profile.cookie_map.get('gid') or '')
+        if len(existing) == _SECURITY_COOKIE_LENGTHS['gid']:
+            return existing
         api = '/api/sec/v1/shield/webprofile'
         profile_data = generate_profile_data(
             self.profile.profile_data_options(
@@ -704,16 +772,14 @@ class XHSCreatorLoginApi:
         api = splice_str('/api/cas/customer/web/zones', {
             'service': self.creator_url,
         })
-        # 浏览器原生是 0101/a1，但脚本客户端实测 0101 档通过率 ~20%、
-        # 0201/nop 冷路径 ~100%（2026-07-25 五连发对照），刻意走 0201。
         headers, cookie_map, _ = self._signed(
             api,
             '',
             'GET',
             include_origin=True,
-            tier='0201',
-            b1_value='',
-            dsl_pair_value='null;undefined',
+            tier='0101',
+            mns_profile='login_early',
+            b1_profile='login',
         )
         self._add_service_ratelimit_header(headers)
         headers = build_creator_login_headers(
@@ -723,20 +789,9 @@ class XHSCreatorLoginApi:
         )
         return api, headers
 
-    def _send_with_gate_retry(self, send_once, *, attempts=5, label=''):
-        """406 概率闸门的请求级重试：同会话换新签名重发。
-
-        2026-07-25 实证：customer 域对 0101 档的 406 是按请求概率的
-        （tgt@0101 同会话第 4 发即 200），不是会话级标记——因此同会话
-        重发有效，无需重建设备。
-        """
-        response = None
-        for attempt in range(1, attempts + 1):
-            response = send_once()
-            if response.status_code != 406:
-                return response
-            logger.debug(f'{label} 406 概率拒绝，同会话重发 ({attempt}/{attempts})')
-        return response
+    def _send_with_gate_retry(self, send_once, *, attempts=1, label=''):
+        """Issue one request and return 406 unchanged; do not retry gate rejections."""
+        return send_once()
 
     def _send_zone_request(self, prepared):
         api, headers = prepared
@@ -749,7 +804,7 @@ class XHSCreatorLoginApi:
             ),
             label='zones',
         )
-        self._debug_dump('zones (GET, 0201/nop)', request_headers=headers, response=response)
+        self._debug_dump('zones (GET, 0101/a1)', request_headers=headers, response=response)
         values = self._merge_response_cookies(response)
         result = response.json()
         return result.get('success', False), result.get('data') or [], values
@@ -763,15 +818,13 @@ class XHSCreatorLoginApi:
             self.profile.update_cookies(cookies)
         api = '/api/cas/customer/web/service-ticket'
         data = {'service': self.creator_url, 'source': '', 'type': 'tgt'}
-        # 浏览器原生是 0101/a1，但脚本客户端实测 0101 档通过率 ~20%、
-        # 0201/nop 冷路径 ~100%（2026-07-25 五连发对照），刻意走 0201。
         headers, cookie_map, body = self._signed(
             api,
             data,
             'POST',
-            tier='0201',
-            b1_value='',
-            dsl_pair_value='null;undefined',
+            tier='0101',
+            mns_profile='login_early',
+            b1_profile='login',
         )
         self._add_service_ratelimit_header(headers)
         headers = build_creator_login_headers(
@@ -794,7 +847,7 @@ class XHSCreatorLoginApi:
             label='service-ticket',
         )
         self._debug_dump(
-            'service-ticket type=tgt (POST, 0201/nop)',
+            'service-ticket type=tgt (POST, 0101/a1)',
             request_headers=headers,
             request_body=body,
             response=response,
@@ -823,25 +876,15 @@ class XHSCreatorLoginApi:
         return detail['active'], detail['cookies']
 
     def exchange_creator_session_from_user_cookies(self, user_cookies):
-        """Validate user-provided Creator cookies and enrich them with security state.
-
-        Merges the user cookies into the current device profile (their a1 wins),
-        probes the CAS session (type=tgt), completes the security bootstrap for
-        that identity, and requires creator user-info acceptance before
-        returning the enriched Cookie map.
-        """
+        """Validate an existing Creator session before importing it."""
         self.profile.update_cookies(user_cookies)
+        self.bootstrap_publish_navigation()
+        self._complete_security()
         session = self.query_session()
         if not session['active']:
             return False, 'creator session exchange failed', {
                 'cookies': self.profile.cookie_map,
                 'res_json': session['res_json'],
-            }
-        try:
-            self._complete_security()
-        except Exception as error:
-            return False, f'creator session security bootstrap failed: {error}', {
-                'cookies': self.profile.cookie_map,
             }
         success, user_info, values = self.get_user_info()
         if not success:
@@ -907,7 +950,17 @@ class XHSCreatorLoginApi:
         detail = self.query_qrcode_status(qr_id, cookies)
         return detail['success'], detail['message'], detail['cookies']
 
-    def get_user_info(self, cookies=None):
+    def get_user_info(
+        self,
+        cookies=None,
+        *,
+        mns_profile='login_ready',
+        b1_profile='login',
+        b1_value=None,
+        tier='0101',
+        dsl_pair_value=None,
+        referer=None,
+    ):
         if cookies:
             self.profile.update_cookies(cookies)
         api = '/api/galaxy/user/info'
@@ -915,13 +968,15 @@ class XHSCreatorLoginApi:
             api,
             '',
             'GET',
-            referer=self.creator_url + '/login',
+            referer=referer or (self.creator_url + '/login'),
             sec_fetch_site='same-origin',
             include_trace_headers=True,
             include_origin=False,
-            tier='0101',
-            mns_profile='login_ready',
-            b1_profile='login',
+            tier=tier,
+            mns_profile=mns_profile,
+            b1_profile=b1_profile,
+            b1_value=b1_value,
+            dsl_pair_value=dsl_pair_value,
         )
         headers['content-type'] = 'application/json;charset=UTF-8'
         headers = build_creator_login_headers(
@@ -977,9 +1032,16 @@ class XHSCreatorLoginApi:
             response=response,
         )
         self._merge_response_cookies(response)
-        result = response.json()
+        try:
+            result = response.json()
+        except ValueError:
+            if response.status_code != 406:
+                raise
+            result = {}
         success = bool(result.get('success'))
         message = result.get('msg') or result.get('message')
+        if response.status_code == 406:
+            message = f'HTTP 406: {message or "request rejected"}'
         if not message:
             message = (
                 '成功'
@@ -1049,17 +1111,18 @@ class XHSCreatorLoginApi:
     def _prepare_login_session(self) -> tuple[dict, dict]:
         """Initialize in browser order through the automatic CAS probe.
 
-        请求顺序（2026-07-25 隔离登录页 CDP 抓包 + mns 签名解码，build 1.19.3）：
-            honeypot(无签名) -> DS(0201/nop seq=1, envConst=1299) -> 立即安装 DS
-            -> zones(0101/a1 login_early seq=2)
-            -> service-ticket type=tgt(seq=3) -> redcaptcha(seq=4)
-            -> sbtsource(seq=5)
-        之后 seccallback(seq=6, login_callback 1321) /
-        webprofile(seq=7, login_ready 1338) / qr-code 全部为 0101/a1。
+        请求顺序（2026-09-06 隔离登录页 CDP 抓包 + mns 签名解码，build 1.26.0）：
+            honeypot(无签名) -> DS(0201/nop seq=1, envConst=1306) -> 立即安装 DS
+            -> redcaptcha(0101/a1 login_early seq=2) -> sbtsource(seq=3)
+            -> zones(seq=4) -> service-ticket type=tgt(seq=5)
+        之后 seccallback(seq=6, login_callback 1327) /
+        webprofile(seq=7, login_ready 1342) / qr-code 全部为 0101/a1。
         0101 档的 406 为按请求概率（同会话重发可过），由 gate retry 兜底。
         """
         cookies = self.generate_init_cookies(complete_security=False)
-        # DS 安装后做 zones + type=tgt（0101/a1 login_early，浏览器原生）。
+        # Chrome 152 在 CAS 请求前先完成 redcaptcha + sbtsource。
+        self._finish_security_bootstrap()
+        # 随后做 zones + type=tgt（同为 0101/a1 login_early）。
         # 先并发构建两条请求再发送，复现浏览器并发启动，并避免 zones 的边缘
         # acw_tc 泄漏进紧随其后的 type=tgt。
         zone_request = self._build_zone_request(cookies)
@@ -1070,8 +1133,6 @@ class XHSCreatorLoginApi:
             # The browser falls back to its built-in zone list.
             logger.debug(f'Creator 区号列表加载失败，继续使用默认区号: {error}')
         session = self._send_session_request(session_request)
-        # zones/tgt 之后才做 redcaptcha + sbtsource（同为 0101/a1 login_early）。
-        self._finish_security_bootstrap()
         return self.profile.cookie_map, session
 
     def _accept_session(self, cookies=None):

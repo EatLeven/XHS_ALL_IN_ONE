@@ -462,7 +462,9 @@ class FakeCreatorLoginAdapter:
         assert cookies == {"a1": "creator-temp-a1"}
         return {"status": "confirmed", "cookies": {"a1": "creator-final-a1", "customer_session": "session-456"}}
 
-    def get_user_info(self, cookies):
+    def get_user_info(self, cookies, qr_id=None):
+        if qr_id:
+            assert qr_id == "creator-qr-123"
         assert cookies["customer_session"] == "session-456"
         return {
             "external_user_id": "creator-user-1",
@@ -478,6 +480,20 @@ class FakeCreatorLoginAdapter:
 class FailingCreatorExchangeAdapter(FakeCreatorLoginAdapter):
     def exchange_from_user_cookies(self, user_cookies):
         raise RuntimeError("creator exchange failed")
+
+
+class VerifiedCreatorExchangeAdapter(FakeCreatorLoginAdapter):
+    def exchange_from_user_cookies(self, user_cookies):
+        result = super().exchange_from_user_cookies(user_cookies)
+        result["user_info"] = {
+            "external_user_id": "creator-user-1",
+            "nickname": "creator-cat",
+            "avatar_url": "https://example.test/creator-avatar.webp",
+        }
+        return result
+
+    def get_user_info(self, cookies, qr_id=None):
+        raise AssertionError("Creator exchange already verified user info")
 
 
 class FailingQrLoginAdapter:
@@ -745,7 +761,7 @@ def test_xhs_pc_qrcode_login_can_optionally_sync_creator_account(tmp_path):
 
     db_dependency = _override_database(tmp_path)
     app.dependency_overrides[get_pc_login_adapter] = lambda: FakePcLoginAdapter()
-    app.dependency_overrides[get_creator_login_adapter] = lambda: FakeCreatorLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: VerifiedCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("pc-auto-creator-operator")
 
@@ -913,8 +929,21 @@ def test_xhs_pc_phone_login_can_optionally_sync_creator_account(tmp_path):
 def test_xhs_creator_phone_login_session_sends_code_and_confirms_account(tmp_path):
     from backend.app.api.login_sessions import get_creator_login_adapter
 
+    class VerifiedCreatorPhoneAdapter(FakePhoneLoginAdapter):
+        def confirm_phone_login(self, phone, code, cookies):
+            result = super().confirm_phone_login(phone, code, cookies)
+            result["user_info"] = {
+                "external_user_id": "phone-user-1",
+                "nickname": "phone-cat",
+                "avatar_url": "https://example.test/phone-avatar.webp",
+            }
+            return result
+
+        def get_user_info(self, cookies):
+            raise AssertionError("Creator verification must use the original phone session")
+
     db_dependency = _override_database(tmp_path)
-    app.dependency_overrides[get_creator_login_adapter] = lambda: FakePhoneLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: VerifiedCreatorPhoneAdapter()
     try:
         access_token = _register_and_get_access_token("creator-phone-operator")
 
@@ -1127,7 +1156,7 @@ def test_account_cookie_import_for_pc_can_optionally_sync_creator_account(tmp_pa
     db_dependency = _override_database(tmp_path)
     fake_pc_adapter = FakeCookieAccountAdapter()
     app.dependency_overrides[get_pc_account_adapter] = lambda: fake_pc_adapter
-    app.dependency_overrides[get_creator_account_adapter] = lambda: FakeCreatorLoginAdapter()
+    app.dependency_overrides[get_creator_account_adapter] = lambda: VerifiedCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("cookie-auto-creator-operator")
 

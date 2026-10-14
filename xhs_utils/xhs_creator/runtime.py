@@ -118,6 +118,12 @@ def run_signer(
     ):
         if key in context:
             payload[key] = context[key]
+    # ``sign.js`` accepts both names for compatibility, but emit the
+    # standalone signer's canonical spelling explicitly.  This prevents a
+    # future adapter change from silently dropping the server-issued _dsf
+    # program on Creator 0101 requests.
+    if context.get('dsProgram') and 'dsfProgram' not in payload:
+        payload['dsfProgram'] = context['dsProgram']
 
     temp_path = ''
     try:

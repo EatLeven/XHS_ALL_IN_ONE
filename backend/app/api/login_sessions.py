@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -90,6 +91,22 @@ def _mask_phone(phone: str) -> str:
     return f"{phone[:3]}****{phone[-4:]}"
 
 
+def _safe_creator_phone_error(error: Exception) -> str:
+    """Expose only a coarse failure category; upstream text may contain secrets."""
+    match = re.search(r"\bHTTP\s+(4\d\d|5\d\d)\b", str(error), re.IGNORECASE)
+    if match:
+        return f"Creator 验证码请求被拒绝（HTTP {match.group(1)}）。"
+    return "Creator 登录初始化失败，请稍后重试。"
+
+
+def _safe_creator_qr_error(error: Exception) -> str:
+    """Keep upstream response details and login state out of the browser."""
+    match = re.search(r"\bHTTP\s+(4\d\d|5\d\d)\b", str(error), re.IGNORECASE)
+    if match:
+        return f"Creator 二维码请求被拒绝（HTTP {match.group(1)}）。"
+    return "Creator 二维码生成失败，请稍后重试。"
+
+
 def _sync_creator_account_from_pc_login(
     *,
     db: Session,
@@ -99,7 +116,9 @@ def _sync_creator_account_from_pc_login(
 ) -> dict | None:
     try:
         creator_result = creator_adapter.exchange_from_user_cookies(pc_cookies)
-        creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
+        creator_user_info = creator_result.get("user_info")
+        if creator_user_info is None:
+            creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
         creator_account, creator_action = _create_account_from_login(
             db=db,
             user_id=user_id,
@@ -186,7 +205,7 @@ def creator_qrcode(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"XHS Creator QR code generation failed: {exc}",
+            detail=_safe_creator_qr_error(exc),
         ) from exc
     session = LoginSession(
         user_id=current_user.id,
@@ -234,7 +253,11 @@ def login_session(
     else:
         result = creator_adapter.check_qrcode_status(session.qr_id, cookies)
         account_sub_type = "creator"
-        user_info = creator_adapter.get_user_info(result["cookies"]) if result["status"] == "confirmed" else None
+        user_info = (
+            creator_adapter.get_user_info(result["cookies"], qr_id=session.qr_id)
+            if result["status"] == "confirmed"
+            else None
+        )
     session.status = result["status"]
     session.encrypted_temp_cookies = encrypt_text(
         _dump_temp_state(result["cookies"], sync_creator=sync_creator)
@@ -318,7 +341,10 @@ def creator_phone_send_code(
     try:
         result = adapter.create_phone_session(payload.phone)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to send phone code") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_safe_creator_phone_error(exc),
+        ) from exc
     session = LoginSession(
         user_id=current_user.id,
         platform="xhs",
@@ -363,7 +389,9 @@ def _confirm_phone_login(
     try:
         cookies, stored_sync_creator = _load_temp_state(decrypt_text(session.encrypted_temp_cookies))
         result = adapter.confirm_phone_login(payload.phone, payload.code, cookies)
-        user_info = adapter.get_user_info(result["cookies"])
+        user_info = result.get("user_info")
+        if user_info is None:
+            user_info = adapter.get_user_info(result["cookies"])
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone login failed") from exc
 

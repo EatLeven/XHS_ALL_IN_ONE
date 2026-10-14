@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "source": "creator-browser-4.3.6-20260719",
+  "source": "creator-browser-4.3.6-20260906",
   "release": {
     "appId": "ugc",
     "platform": "Windows",
     "signVersion": "4.3.6",
     "b1SdkVersion": "3.5.4",
     "webProfileSdkVersion": "4.3.6",
-    "webBuild": "1.18.0",
-    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-    "secChUa": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+    "webBuild": "1.26.0",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+    "secChUa": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"152\", \"Google Chrome\";v=\"152\""
   },
   "webProfile": {
     "algorithm": "base64-des-ecb-zero-padding-hex",
     "svn": "2",
     "fields": {
-      "x1": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+      "x1": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
       "x2": "false",
       "x3": "zh-CN",
       "x4": "24",
@@ -74,7 +74,7 @@
       "x58": "575",
       "x59": "141",
       "x60": "63",
-      "x61": "1338",
+      "x61": "1342",
       "x62": "2047",
       "x63": "0",
       "x64": "0",
@@ -122,13 +122,13 @@
   },
   "b1Reference": {
     "frameCount": 2,
-    "x39": 0,
+    "x39": 16,
     "x50": "",
     "x51": "",
     "generatedAtOffsetMs": 1895,
     "secCanvas": "__SEC_CAV__1-1-1-1-1|__SEC_UD__|",
     "timeOriginOffsetMs": -870.4,
-    "x37": "0|0|0|0|0|0|0|0|0|1|0|0|0|0|0|0|0|0|1|0|0|0|0|0",
+    "x37": "0|0|0|0|0|0|0|0|0|1|0|0|1|0|0|0|0|1|1|0|0|0|0|0",
     "x38": "0|0|1|0|1|0|0|0|0|0|1|0|1|0|1|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0",
     "selectedGlobalNames": [
       "_AUuXfEG27Xa3x",
@@ -139,16 +139,17 @@
       "__rap_last_sign_cost__",
       "__rap_last_transform_cost__",
       "__rap_hijack_installed__",
-      "__SW_AB_GROUP__",
-      "anti__hp__",
-      "__hp_creator_tab_state__",
       "_BHjFmfUMEtxhI",
+      "__USE_CUSTOM_TIMING__",
+      "__CUSTOM_FMP_ELEMENTS__",
+      "__COLLECTED_FMP_ELEMENTS__",
+      "__CUSTOM_TTI_ELEMENTS__",
       "__setVerifyMsgBase64__"
     ],
-    "page": {"ulr": 0, "rs": 8, "f": 1, "ps": 1},
+    "page": {"ulr": 5, "rs": 1, "ps": 1},
     "state": {"h": 0, "f": 1, "kr": 0},
     "features": {"ae": null, "ak": null, "cdr": null, "bf": null, "fi": null},
-    "evidence": "Fresh isolated Creator login page11 webprofile b1 decoded on 2026-07-19"
+    "evidence": "Fresh authenticated Creator publish page b1 decoded on Chrome 152, 2026-09-07"
   },
   "b1Profiles": {
     "note_manager": {
@@ -194,14 +195,14 @@
     "bootstrap": {
       "tier": "0201",
       "deviceTag": "nop",
-      "envConst": 1299,
+      "envConst": 1306,
       "envFpTailHex": "f8536767c9b581635e0744fa8415",
       "evidence": "Fresh Creator login page11 DS request seq=1 decoded on 2026-07-19"
     },
     "ready": {
       "tier": "0101",
       "deviceTag": "a1",
-      "envConst": 1338,
+      "envConst": 1341,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
       "evidence": "Fresh Creator login page11 steady webprofile/QR-ready state"
     }
@@ -210,37 +211,72 @@
     "login_early": {
       "tier": "0101",
       "deviceTag": "a1",
-      "envConst": 1319,
+      "envConst": 1325,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
       "evidence": "Creator page11 redcaptcha/sbtsource/zones/tgt seq=2-5"
     },
     "login_callback": {
       "tier": "0101",
       "deviceTag": "a1",
-      "envConst": 1321,
+      "envConst": 1327,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
       "evidence": "Creator page11 seccallback seq=6"
     },
     "login_ready": {
       "tier": "0101",
       "deviceTag": "a1",
-      "envConst": 1338,
+      "envConst": 1350,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
       "evidence": "Creator page11 webprofile seq=7 and steady login requests"
     },
+    "publish_user_info": {
+      "tier": "0101",
+      "deviceTag": "a1",
+      "envConst": 1337,
+      "envFpTailHex": "f9536767c9b581635e0744fa8415",
+      "evidence": "Authenticated Creator publish navigation user/info, Chrome 152, 2026-09-07"
+    },
     "note_manager": {
       "tier": "0101",
-      "deviceTag": "nop",
-      "envConst": 1313,
+      "deviceTag": "a1",
+      "envConst": 1339,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
-      "evidence": "Creator note-manager cold request req1839: MNS0101+nop, server accepted on 2026-07-19"
+      "evidence": "Authenticated Creator note-manager request, Chrome 152, 2026-09-06"
     },
     "note_manager_steady": {
       "tier": "0101",
       "deviceTag": "a1",
-      "envConst": 1332,
+      "envConst": 1339,
       "envFpTailHex": "f9536767c9b581635e0744fa8415",
-      "evidence": "Creator note-manager steady request after the cold nop request"
+      "evidence": "Authenticated Creator note-manager subsequent request, Chrome 152, 2026-09-06"
+    },
+    "publish_mountable": {
+      "tier": "0101",
+      "deviceTag": "a1",
+      "envConst": 1341,
+      "envFpTailHex": "f9536767c9b581635e0744fa8415",
+      "evidence": "Authenticated Creator publish mountable APIs, Chrome 152, 2026-09-06"
+    },
+    "publish_permit": {
+      "tier": "0101",
+      "deviceTag": "a1",
+      "envConst": 1349,
+      "envFpTailHex": "f9536767c9b581635e0744fa8415",
+      "evidence": "Authenticated Creator image upload permit req110, Chrome 152, 2026-09-07"
+    },
+    "publish_permit_image": {
+      "tier": "0101",
+      "deviceTag": "a1",
+      "envConst": 1349,
+      "envFpTailHex": "f9536767c9b581635e0744fa8415",
+      "evidence": "Authenticated Creator scene=image upload permit req110, Chrome 152, 2026-09-07"
+    },
+    "publish_permit_video": {
+      "tier": "0101",
+      "deviceTag": "a1",
+      "envConst": 1349,
+      "envFpTailHex": "f9536767c9b581635e0744fa8415",
+      "evidence": "Authenticated Creator scene=video upload permit req98, Chrome 152, 2026-09-07"
     }
   }
 }

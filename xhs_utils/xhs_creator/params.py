@@ -20,9 +20,17 @@ if TYPE_CHECKING:
 
 
 CREATOR_SEC_CH_UA = (
-    '"Not;A=Brand";v="8", "Chromium";v="150", '
-    '"Google Chrome";v="150"'
+    '"Not;A=Brand";v="8", "Chromium";v="152", '
+    '"Google Chrome";v="152"'
 )
+CREATOR_CURRENT_BROWSER_UA = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
+)
+# Chrome 152's XHR/fetch requests on the Creator publish page use the short
+# language list.  The longer list is only observed on the cross-origin media
+# PUT upload and must not be reused for signed Creator API requests.
+CREATOR_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9'
 CREATOR_NAVIGATION_HEADER_ORDER = (
     'upgrade-insecure-requests', 'user-agent', 'sec-ch-ua',
     'sec-ch-ua-mobile', 'sec-ch-ua-platform', 'accept', 'accept-encoding',
@@ -165,10 +173,10 @@ def get_request_headers_template(
             'userAgent',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/150.0.0.0 Safari/537.36',
+            'Chrome/152.0.0.0 Safari/537.36',
         ),
         'accept': 'application/json, text/plain, */*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7,ja;q=0.6',
+        'accept-language': CREATOR_ACCEPT_LANGUAGE,
         'sec-fetch-dest': 'empty',
         'sec-fetch-mode': 'cors',
         'sec-fetch-site': sec_fetch_site,
@@ -342,6 +350,7 @@ __all__ = [
     'splice_str',
     'get_request_headers_template',
     'CREATOR_SEC_CH_UA',
+    'CREATOR_ACCEPT_LANGUAGE',
     'build_creator_navigation_headers',
     'build_creator_login_headers',
     'build_creator_business_headers',

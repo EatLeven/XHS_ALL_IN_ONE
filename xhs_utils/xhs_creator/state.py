@@ -198,7 +198,12 @@ class CreatorB1RuntimeState:
             state=dict(value.get('state') or {}),
             features=dict(value.get('features') or {}),
         )
-        state._jitter(origin_base)
+        # A caller-supplied start time denotes a captured fixture and must
+        # remain byte-for-byte reproducible.  Live sessions (no explicit
+        # start time) still receive the per-session collector variation that
+        # the browser emits.
+        if started_at is None:
+            state._jitter(origin_base)
         return state
 
     def _jitter(self, origin_base: float) -> None:
@@ -214,16 +219,16 @@ class CreatorB1RuntimeState:
 
         # frameCount: login fixture 2 / note-manager 6; real pages vary ±1
         self.frame_count = max(1, self.frame_count + random.choice((-1, 0, 1)))
-        # x37 collector bits: browsers present 2-4 ones; additively flip 1-3 zeros
-        bits = [int(part) for part in self.x37_value.split('|')]
-        zeros = [index for index, bit in enumerate(bits) if bit == 0]
-        for index in random.sample(zeros, min(len(zeros), random.randint(1, 3))):
-            bits[index] = 1
-        self.x37_value = '|'.join(str(bit) for bit in bits)
-        # x39 collector cache count (observed 0/2/22): fresh 0-5 per session
-        self.x39_value = random.randint(0, 5)
+        # x37 is a stable capability bitset for the current Chrome 152
+        # Creator collector; keep the captured publish-page pattern intact.
+        # Creator 4.3.6 currently reports a 16-22 collector cache count on
+        # the publish page (fresh captures: 16, 17, 18, 19).  Values near
+        # zero are an old login-page profile and are edge-clustered when
+        # reused for authenticated media requests.
+        self.x39_value = random.randint(16, 22)
         # timeOrigin: fixture constant -> 50-3000ms before page load
-        self.time_origin_ms = origin_base - random.uniform(50, 3000)
+        # Chrome serializes the timing origin with one decimal place.
+        self.time_origin_ms = round(origin_base - random.uniform(50, 3000), 1)
         # x84 page telemetry key order matches the 1.19.3 browser serialization
         preference = ('ulr', 'f', 'rs', 'ps')
         self.page = {
@@ -255,7 +260,9 @@ class CreatorB1RuntimeState:
             'x36': str(self.frame_count),
             'x37': self.x37_value,
             'x38': self.x38_value,
-            'x82': '|'.join(self.selected_global_names),
+            # The browser collector truncates the global-name snapshot to
+            # 300 characters before encrypting it.
+            'x82': '|'.join(self.selected_global_names)[:300],
             'x84': self.telemetry(),
             **self.overrides,
         }
@@ -454,6 +461,46 @@ class CreatorDeviceProfile:
                     f'{candidate.tier}, request resolved to {resolved}'
                 )
             material = candidate
+        # The current Creator page uses route-specific ready-tier environment
+        # constants.  A fresh publish tab observed 1337 for the first
+        # user/info call, 1341 for mountable APIs, 1349 for upload permits,
+        # and 1350 for webprofile/security refreshes.  These are not
+        # image/video constants, so both permit scenes share 1349.
+        if (
+            resolved == '0101'
+            and stage_key not in self._mns_stage_overrides
+            and str(mns_profile or '') not in {'login_early', 'login_callback'}
+        ):
+            profile_key = str(mns_profile or '')
+            if profile_key == 'publish_user_info':
+                env_const = 1337
+            elif profile_key == 'publish_mountable':
+                env_const = 1341
+            elif profile_key in {
+                'publish_permit', 'publish_permit_image',
+                'publish_permit_video',
+            }:
+                env_const = 1349
+            elif profile_key in {'note_manager', 'note_manager_steady'}:
+                # These profiles already carry their own captured route
+                # constant (currently 1339).  They predate the publish-page
+                # route table and must not be rewritten to the generic 1351
+                # fallback below.
+                env_const = int(material.env_const)
+            elif profile_key == 'login_ready':
+                env_const = 1350
+            else:
+                env_const = 1351
+            if int(material.env_const) != env_const:
+                material = CreatorMnsMaterial(
+                    tier=material.tier,
+                    device_tag=material.device_tag,
+                    env_const=env_const,
+                    env_fp_tail=material.env_fp_tail,
+                    evidence=(
+                        f'{material.evidence}; route profile={profile_key or "default"}'
+                    ),
+                )
         return resolved, material
 
     def set_mns_stage(
